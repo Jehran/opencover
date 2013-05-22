@@ -244,7 +244,6 @@ namespace OpenCover.Framework
         /// </summary>
         /// <param name="entity"></param>
         /// <returns></returns>
-        [ExcludeFromCoverage]
         public bool ExcludeByAttribute(IMemberDefinition entity)
         {
             if (ExcludedAttributes.Count == 0) 
@@ -270,14 +269,14 @@ namespace OpenCover.Framework
                     if (target.IsGetter)
                     {
                         var getMethod = entity.DeclaringType.Properties.FirstOrDefault(p => p.GetMethod == target);
-                        if (getMethod != null) return ExcludeByAttribute(getMethod);
+                        return ExcludeByAttribute(getMethod);
                     }
-                    else if (target.IsSetter)
+                    if (target.IsSetter)
                     {
                         var setMethod = entity.DeclaringType.Properties.FirstOrDefault(p => p.SetMethod == target);
-                        if (setMethod != null) return ExcludeByAttribute(setMethod);
+                        return ExcludeByAttribute(setMethod);
                     }
-                    else return ExcludeByAttribute(target);
+                    return ExcludeByAttribute(target);
                 }
             }
             return false;

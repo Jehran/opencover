@@ -24,45 +24,37 @@ namespace OpenCover.Framework.Symbols
 {
     internal class CecilSymbolManager : ISymbolManager
     {
-        private const int stepOverLineCode = 0xFEEFEE;
+        private const int StepOverLineCode = 0xFEEFEE;
         private readonly ICommandLine _commandLine;
         private readonly IFilter _filter;
         private readonly ILog _logger;
-        private readonly ITrackedMethodStrategy[] _trackedMethodStrategies;
-        private string _modulePath;
-        private string _moduleName;
+        private readonly ITrackedMethodStrategyManager _trackedMethodStrategyManager;
         private AssemblyDefinition _sourceAssembly;
-        private Dictionary<int, MethodDefinition> _methodMap = new Dictionary<int, MethodDefinition>(); 
+        private readonly Dictionary<int, MethodDefinition> _methodMap = new Dictionary<int, MethodDefinition>(); 
 
-        public CecilSymbolManager(ICommandLine commandLine, IFilter filter, ILog logger, ITrackedMethodStrategy[] trackedMethodStrategies)
+        public CecilSymbolManager(ICommandLine commandLine, IFilter filter, ILog logger, ITrackedMethodStrategyManager trackedMethodStrategyManager)
         {
             _commandLine = commandLine;
             _filter = filter;
             _logger = logger;
-            _trackedMethodStrategies = trackedMethodStrategies;
+            _trackedMethodStrategyManager = trackedMethodStrategyManager;
         }
 
-        public string ModulePath
-        {
-            get { return _modulePath; }
-        }
+        public string ModulePath { get; private set; }
 
-        public string ModuleName
-        {
-            get { return _moduleName; }
-        }
+        public string ModuleName { get; private set; }
 
         public void Initialise(string modulePath, string moduleName)
         {
-            _modulePath = modulePath;
-            _moduleName = moduleName;
+            ModulePath = modulePath;
+            ModuleName = moduleName;
         }
 
         private string FindSymbolsFolder()
         {
-            var origFolder = Path.GetDirectoryName(_modulePath);
+            var origFolder = Path.GetDirectoryName(ModulePath);
 
-            return FindSymbolsFolder(_modulePath, origFolder) ?? FindSymbolsFolder(_modulePath, _commandLine.TargetDir) ?? FindSymbolsFolder(_modulePath, Environment.CurrentDirectory);
+            return FindSymbolsFolder(ModulePath, origFolder) ?? FindSymbolsFolder(ModulePath, _commandLine.TargetDir) ?? FindSymbolsFolder(ModulePath, Environment.CurrentDirectory);
         }
 
         private static string FindSymbolsFolder(string fileName, string targetfolder)
@@ -96,7 +88,7 @@ namespace OpenCover.Framework.Symbols
                             ReadingMode = ReadingMode.Deferred,
                             ReadSymbols = true,
                         };
-                        _sourceAssembly = AssemblyDefinition.ReadAssembly(Path.Combine(folder, Path.GetFileName(_modulePath)), parameters);
+                        _sourceAssembly = AssemblyDefinition.ReadAssembly(Path.Combine(folder, Path.GetFileName(ModulePath)), parameters);
 
                         if (_sourceAssembly != null)
                             _sourceAssembly.MainModule.ReadSymbols();
@@ -114,7 +106,7 @@ namespace OpenCover.Framework.Symbols
                     {
                         if (_logger.IsDebugEnabled)
                         {
-                            _logger.DebugFormat("Cannot instrument {0} as no PDB could be loaded", _modulePath);
+                            _logger.DebugFormat("Cannot instrument {0} as no PDB could be loaded", ModulePath);
                         }
                     }
                 }
@@ -137,7 +129,7 @@ namespace OpenCover.Framework.Symbols
             if (SourceAssembly == null) return new Class[0];
             var classes = new List<Class>();
             IEnumerable<TypeDefinition> typeDefinitions = SourceAssembly.MainModule.Types;
-            GetInstrumentableTypes(typeDefinitions, classes, _filter, _moduleName);
+            GetInstrumentableTypes(typeDefinitions, classes, _filter, ModuleName);
             return classes.ToArray();
         }
 
@@ -150,11 +142,11 @@ namespace OpenCover.Framework.Symbols
                 var @class = new Class() { FullName = typeDefinition.FullName };
                 if (!filter.InstrumentClass(moduleName, @class.FullName))
                 {
-                    @class.SkippedDueTo = SkippedMethod.Filter;
+                    @class.MarkAsSkipped(SkippedMethod.Filter);
                 }
                 else if (filter.ExcludeByAttribute(typeDefinition))
                 {
-                    @class.SkippedDueTo = SkippedMethod.Attribute;
+                    @class.MarkAsSkipped(SkippedMethod.Attribute);
                 }
 
                 var list = new List<string>();
@@ -201,7 +193,7 @@ namespace OpenCover.Framework.Symbols
             if (definition.HasBody && definition.Body.Instructions!=null)
             {
                 var filePath = definition.Body.Instructions
-                    .Where(x => x.SequencePoint != null && x.SequencePoint.Document != null && x.SequencePoint.StartLine != stepOverLineCode)
+                    .Where(x => x.SequencePoint != null && x.SequencePoint.Document != null && x.SequencePoint.StartLine != StepOverLineCode)
                     .Select(x => x.SequencePoint.Document.Url)
                     .FirstOrDefault();
                 return filePath;
@@ -267,9 +259,9 @@ namespace OpenCover.Framework.Symbols
             method.MetadataToken = methodDefinition.MetadataToken.ToInt32();
 
             if (alreadySkippedDueToAttr || filter.ExcludeByAttribute(methodDefinition))
-                method.SkippedDueTo = SkippedMethod.Attribute;
+                method.MarkAsSkipped(SkippedMethod.Attribute);
             else if (filter.ExcludeByFile(GetFirstFile(methodDefinition)))
-                method.SkippedDueTo = SkippedMethod.File;
+                method.MarkAsSkipped(SkippedMethod.File);
 
             var definition = methodDefinition;
             method.FileRef = files.Where(x => x.FullPath == GetFirstFile(definition))
@@ -333,7 +325,7 @@ namespace OpenCover.Framework.Symbols
             foreach (var instruction in methodDefinition.Body.Instructions)
             {
                 if (instruction.SequencePoint != null &&
-                    instruction.SequencePoint.StartLine != stepOverLineCode)
+                    instruction.SequencePoint.StartLine != StepOverLineCode)
                 {
                     var sp = instruction.SequencePoint;
                     var point = new SequencePoint()
@@ -388,13 +380,14 @@ namespace OpenCover.Framework.Symbols
         public TrackedMethod[] GetTrackedMethods()
         {
             if (SourceAssembly==null) return null;
-            var trackedmethods = new List<TrackedMethod>();
-            foreach (var trackedMethodStrategy in _trackedMethodStrategies)
+
+            var modulePath = ModulePath;
+            if (!System.IO.File.Exists(modulePath))
             {
-                IEnumerable<TypeDefinition> typeDefinitions = SourceAssembly.MainModule.Types;
-                trackedmethods.AddRange(trackedMethodStrategy.GetTrackedMethods(typeDefinitions));
+                modulePath = Path.Combine(_commandLine.TargetDir, Path.GetFileName(modulePath));
             }
-            return trackedmethods.ToArray();
+
+            return _trackedMethodStrategyManager.GetTrackedMethods(modulePath);
         }
     }
 }

@@ -30,9 +30,13 @@ HRESULT STDMETHODCALLTYPE CCodeCoverage::Initialize(
     RELTRACE(L"    ::Initialize(...) => CLSID == %s", szGuid);
     //::OutputDebugStringW(szGuid);
 
+	WCHAR szExeName[MAX_PATH];
+	GetModuleFileNameW(NULL, szExeName, MAX_PATH);
+    RELTRACE(L"    ::Initialize(...) => EXE = %s", szExeName);
+
     WCHAR szModuleName[MAX_PATH];
     GetModuleFileNameW(_AtlModule.m_hModule, szModuleName, MAX_PATH);
-    RELTRACE(L"    ::Initialize(...) => PATH = %s", szModuleName);
+    RELTRACE(L"    ::Initialize(...) => PROFILER = %s", szModuleName);
     //::OutputDebugStringW(szModuleName);
 
     if (g_pProfiler!=NULL) 
@@ -45,6 +49,8 @@ HRESULT STDMETHODCALLTYPE CCodeCoverage::Initialize(
     if (m_profilerInfo2 != NULL) ATLTRACE(_T("    ::Initialize (m_profilerInfo2 OK)"));
     if (m_profilerInfo2 == NULL) return E_FAIL;
     m_profilerInfo3 = pICorProfilerInfoUnk;
+	m_profilerInfo4 = pICorProfilerInfoUnk;
+
     ZeroMemory(&m_runtimeVersion, sizeof(m_runtimeVersion));
     if (m_profilerInfo3 != NULL) 
     {
@@ -60,7 +66,6 @@ HRESULT STDMETHODCALLTYPE CCodeCoverage::Initialize(
         ATLTRACE(_T("    ::Initialize (Runtime %d)"), m_runtimeType);
     }
 
-
     TCHAR key[1024] = {0};
     ::GetEnvironmentVariable(_T("OpenCover_Profiler_Key"), key, 1024);
     RELTRACE(_T("    ::Initialize(...) => key = %s"), key);
@@ -72,6 +77,17 @@ HRESULT STDMETHODCALLTYPE CCodeCoverage::Initialize(
     TCHAR instrumentation[1024] = {0};
     ::GetEnvironmentVariable(_T("OpenCover_Profiler_Instrumentation"), instrumentation, 1024);
     ATLTRACE(_T("    ::Initialize(...) => instrumentation = %s"), instrumentation);
+
+    TCHAR threshold[1024] = {0};
+    ::GetEnvironmentVariable(_T("OpenCover_Profiler_Threshold"), threshold, 1024);
+	m_threshold = _tcstoul(threshold, NULL, 10);
+    ATLTRACE(_T("    ::Initialize(...) => threshold = %ul"), m_threshold);
+
+    TCHAR tracebyTest[1024] = {0};
+	::GetEnvironmentVariable(_T("OpenCover_Profiler_TraceByTest"), tracebyTest, 1024);
+    bool tracingEnabled = _tcslen(tracebyTest) != 0;
+    ATLTRACE(_T("    ::Initialize(...) => tracingEnabled = %s (%s)"), tracingEnabled ? _T("true") : _T("false"), tracebyTest);
+
 
     m_useOldStyle = (tstring(instrumentation) == _T("oldSchool"));
 
@@ -86,11 +102,20 @@ HRESULT STDMETHODCALLTYPE CCodeCoverage::Initialize(
     dwMask |= COR_PRF_MONITOR_JIT_COMPILATION;	    // Controls the JITCompilation, JITFunctionPitched, and JITInlining callbacks.
     dwMask |= COR_PRF_DISABLE_INLINING;				// Disables all inlining.
     dwMask |= COR_PRF_DISABLE_OPTIMIZATIONS;		// Disables all code optimizations.
-    dwMask |= COR_PRF_USE_PROFILE_IMAGES;           // Don't use NGen images
-    dwMask |= COR_PRF_MONITOR_ENTERLEAVE;           // Controls the FunctionEnter, FunctionLeave, and FunctionTailcall callbacks.
+    dwMask |= COR_PRF_USE_PROFILE_IMAGES;           // Causes the native image search to look for profiler-enhanced images
+	
+	if (tracingEnabled)
+		dwMask |= COR_PRF_MONITOR_ENTERLEAVE;       // Controls the FunctionEnter, FunctionLeave, and FunctionTailcall callbacks.
 
     if (m_useOldStyle)
        dwMask |= COR_PRF_DISABLE_TRANSPARENCY_CHECKS_UNDER_FULL_TRUST;      // Disables security transparency checks that are normally done during just-in-time (JIT) compilation and class loading for full-trust assemblies. This can make some instrumentation easier to perform.
+
+	if (m_profilerInfo4 != NULL)
+	{
+        ATLTRACE(_T("    ::Initialize (m_profilerInfo4 OK)"));
+		//dwMask |= COR_PRF_ENABLE_REJIT;
+		//dwMask |= COR_PRF_DISABLE_ALL_NGEN_IMAGES;
+	}
 
     COM_FAIL_MSG_RETURN_ERROR(m_profilerInfo2->SetEventMask(dwMask), 
         _T("    ::Initialize(...) => SetEventMask => 0x%X"));
@@ -120,7 +145,9 @@ HRESULT STDMETHODCALLTYPE CCodeCoverage::Initialize(
 /// <summary>Handle <c>ICorProfilerCallback::Shutdown</c></summary>
 HRESULT STDMETHODCALLTYPE CCodeCoverage::Shutdown( void) 
 { 
-    RELTRACE(_T("::Shutdown - Nothing left to do but return S_OK"));
+	WCHAR szExeName[MAX_PATH];
+	GetModuleFileNameW(NULL, szExeName, MAX_PATH);
+	RELTRACE(_T("::Shutdown - Nothing left to do but return S_OK(%s)"), szExeName);
     g_pProfiler = NULL;
     return S_OK; 
 }
@@ -132,7 +159,12 @@ HRESULT STDMETHODCALLTYPE CCodeCoverage::Shutdown( void)
 /// </remarks>
 static void __fastcall InstrumentPointVisit(ULONG seq)
 {
-    CCodeCoverage::g_pProfiler->m_host.AddVisitPoint(seq);
+    CCodeCoverage::g_pProfiler->AddVisitPoint(seq);
+}
+
+void CCodeCoverage::AddVisitPoint(ULONG uniqueId)
+{
+	m_host.AddVisitPointWithThreshold(uniqueId, m_threshold);
 }
 
 static COR_SIGNATURE visitedMethodCallSignature[] = 
@@ -432,6 +464,7 @@ HRESULT STDMETHODCALLTYPE CCodeCoverage::JITCompilationStarted(
             //seqPoints.clear();
             //brPoints.clear();
 
+			// Instrument method
             InstrumentMethod(moduleId, instumentedMethod, seqPoints, brPoints);
 
             instumentedMethod.DumpIL();
@@ -453,6 +486,15 @@ HRESULT STDMETHODCALLTYPE CCodeCoverage::JITCompilationStarted(
             // only do this for .NET4 and above as there are issues with earlier runtimes (Access Violations)
             if (m_runtimeVersion.usMajorVersion >= 4)
                 CoTaskMemFree(pMap);
+
+			// resize the threshold array 
+			if (m_threshold != 0)
+			{
+				if (seqPoints.size() > 0) 
+					m_host.Resize(seqPoints.back().UniqueId + 1);
+				if (brPoints.size() > 0) 
+					m_host.Resize(brPoints.back().UniqueId + 1);
+			}
         }
     }
     
@@ -464,7 +506,12 @@ void CCodeCoverage::InstrumentMethod(ModuleID moduleId, Method& method,  std::ve
     if (m_useOldStyle)
     {
         mdSignature pvsig = GetMethodSignatureToken_I4(moduleId);
-        void (__fastcall *pt)(ULONG) = &InstrumentPointVisit ;
+        void (__fastcall *pt)(ULONG) = &InstrumentPointVisit;
+
+		InstructionList instructions;
+		CoverageInstrumentation::InsertFunctionCall(instructions, pvsig, (FPTR)pt, seqPoints[0].UniqueId);
+		if (method.IsInstrumented(0, instructions)) return;
+
         CoverageInstrumentation::AddSequenceCoverage([pvsig, pt](InstructionList& instructions, ULONG uniqueId)->Instruction*
         {
             return CoverageInstrumentation::InsertFunctionCall(instructions, pvsig, (FPTR)pt, uniqueId);
@@ -478,7 +525,12 @@ void CCodeCoverage::InstrumentMethod(ModuleID moduleId, Method& method,  std::ve
     else
     {
         mdMethodDef injectedVisitedMethod = RegisterSafeCuckooMethod(moduleId);
-        CoverageInstrumentation::AddSequenceCoverage([injectedVisitedMethod](InstructionList& instructions, ULONG uniqueId)->Instruction*
+
+		InstructionList instructions;
+		CoverageInstrumentation::InsertInjectedMethod(instructions, injectedVisitedMethod, seqPoints[0].UniqueId);
+		if (method.IsInstrumented(0, instructions)) return;
+		
+		CoverageInstrumentation::AddSequenceCoverage([injectedVisitedMethod](InstructionList& instructions, ULONG uniqueId)->Instruction*
         {
             return CoverageInstrumentation::InsertInjectedMethod(instructions, injectedVisitedMethod, uniqueId);
         }, method, seqPoints);
