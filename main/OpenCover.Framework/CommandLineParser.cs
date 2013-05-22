@@ -4,12 +4,14 @@
 // This source code is released under the MIT License; see the accompanying license file.
 //
 using System;
+using System.ComponentModel;
 using System.Globalization;
 using System.Reflection;
 using System.Text;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text.RegularExpressions;
+using OpenCover.Framework.Model;
 using log4net.Core;
 
 namespace OpenCover.Framework
@@ -33,6 +35,9 @@ namespace OpenCover.Framework
             FileExclusionFilters = new List<string>();
             TestFilters = new List<string>();
             LogLevel = Level.Info;
+            HideSkipped = new List<SkippedMethod>();
+            EnablePerformanceCounters = false;
+            TraceByTest = false;
         }
 
         /// <summary>
@@ -57,8 +62,11 @@ namespace OpenCover.Framework
             builder.AppendLine("    [-excludebyattribute:<filter>[;<filter>][;<filter>]]");
             builder.AppendLine("    [-excludebyfile:<filter>[;<filter>][;<filter>]]");
             builder.AppendLine("    [-coverbytest:<filter>[;<filter>][;<filter>]]");
+            builder.AppendLine("    [-hideskipped:File|Filter|Attribute|MissingPdb|All,[File|Filter|Attribute|MissingPdb|All]]");
             builder.AppendLine("    [-log:[Off|Fatal|Error|Warn|Info|Debug|Verbose|All]]");
             builder.AppendLine("    [-service]");
+            builder.AppendLine("    [-threshold:<max count>]");
+            builder.AppendLine("    [-enableperformancecounters]");
             builder.AppendLine("    [-oldStyle]");
             builder.AppendLine("or");
             builder.AppendLine("    -?");
@@ -117,15 +125,8 @@ namespace OpenCover.Framework
                         break;
                     case "returntargetcode":
                         ReturnTargetCode = true;
-                        var argument = GetArgumentValue("returntargetcode");
-                        if (argument != string.Empty)
-                        {
-                            int offset;
-                            if (int.TryParse(argument, out offset))
-                                ReturnCodeOffset = offset;
-                            else
-                                throw new InvalidOperationException("The return target code offset must be an integer");
-                        }
+                        ReturnCodeOffset = ExtractValue<int>("returntargetcode", () =>
+                            { throw new InvalidOperationException("The return target code offset must be an integer"); });
                         break;
                     case "filter":
                         Filters = ExtractFilters(GetArgumentValue("filter"));
@@ -135,15 +136,19 @@ namespace OpenCover.Framework
                         break;
                     case "excludebyattribute":
                         AttributeExclusionFilters = GetArgumentValue("excludebyattribute")
-                            .Split(";".ToCharArray()).ToList();
+                            .Split(';').ToList();
                         break;
                     case "excludebyfile":
                         FileExclusionFilters = GetArgumentValue("excludebyfile")
-                            .Split(";".ToCharArray()).ToList();
+                            .Split(';').ToList();
+                        break;
+                    case "hideskipped":
+                        HideSkipped = ExtractSkipped(GetArgumentValue("hideskipped"));
                         break;
                     case "coverbytest":
                         TestFilters = GetArgumentValue("coverbytest")
-                            .Split(";".ToCharArray()).ToList();
+                            .Split(';').ToList();
+                        TraceByTest = TestFilters.Any();
                         break;
                     case "log":
                         var value = GetArgumentValue("log");
@@ -155,6 +160,13 @@ namespace OpenCover.Framework
                         break;
                     case "oldstyle":
                         OldStyleInstrumentation = true;
+                        break;
+                    case "enableperformancecounters":
+                        EnablePerformanceCounters = true;
+                        break;
+                    case "threshold":
+                        Threshold = ExtractValue<ulong>("threshold", () =>
+                            { throw new InvalidOperationException("The threshold must be an integer"); });
                         break;
                     case "?":
                         PrintUsage = true;
@@ -172,6 +184,25 @@ namespace OpenCover.Framework
             }
         }
 
+        private T ExtractValue<T>(string argumentName, Action onError)
+        {
+            var textValue = GetArgumentValue(argumentName);
+            if (!string.IsNullOrEmpty(textValue))
+            {
+                try
+                {
+                    return (T)TypeDescriptor
+                        .GetConverter(typeof (T))
+                        .ConvertFromString(textValue);
+                }
+                catch (Exception)
+                {
+                    onError();
+                }
+            }
+            return default(T);
+        }
+
         private static List<string> ExtractFilters(string rawFilters)
         {
             const string strRegex = @"([+-][\[].*?[\]].+?\s)|([+-][\[].*?[\]].*)";
@@ -179,6 +210,34 @@ namespace OpenCover.Framework
             var myRegex = new Regex(strRegex, myRegexOptions);
             
             return (from Match myMatch in myRegex.Matches(rawFilters) where myMatch.Success select myMatch.Value.Trim()).ToList();
+        }
+
+        private static List<SkippedMethod> ExtractSkipped(string skipped)
+        {
+            if (string.IsNullOrWhiteSpace(skipped)) skipped = "All";
+            var options = skipped.Split(';');
+            var list = new List<SkippedMethod>();
+            foreach (var option in options)
+            {
+                switch (option.ToLowerInvariant())
+                {
+                    case "all":
+                        list.Add(SkippedMethod.Attribute);
+                        list.Add(SkippedMethod.File);
+                        list.Add(SkippedMethod.Filter);
+                        list.Add(SkippedMethod.MissingPdb);
+                        break;
+                    default:
+                        SkippedMethod result;
+                        if (!Enum.TryParse(option, true, out result))
+                        {
+                            throw new InvalidOperationException(string.Format("The hideskipped option {0} is not valid", option));
+                        }
+                        list.Add(result);
+                        break;
+                }
+            }
+            return list.Distinct().ToList();
         }
 
         /// <summary>
@@ -267,6 +326,18 @@ namespace OpenCover.Framework
         public List<string> TestFilters { get; private set; }
 
         /// <summary>
+        /// A list of skipped entities to hide from being ouputted
+        /// </summary>
+        public List<SkippedMethod> HideSkipped { get; private set; }
+
+        /// <summary>
+        /// Set the threshold i.e. max visit count reporting
+        /// </summary>
+        public ulong Threshold { get; private set; }
+
+        public bool TraceByTest { get; private set; }
+
+        /// <summary>
         /// The logging level based on log4net.Core.Level
         /// </summary>
         public Level LogLevel { get; private set; }
@@ -281,6 +352,11 @@ namespace OpenCover.Framework
         /// work when - ngen install /Profile "mscorlib" - has been used
         /// </summary>
         public bool OldStyleInstrumentation { get; private set; }
+
+        /// <summary>
+        /// Enable the performance counters
+        /// </summary>
+        public bool EnablePerformanceCounters { get; private set; }
     }
 
 }

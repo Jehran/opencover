@@ -3,6 +3,10 @@
 //
 // This source code is released under the MIT License; see the accompanying license file.
 //
+
+using System.Collections.Generic;
+using OpenCover.Framework.Model;
+
 namespace OpenCover.Framework
 {
     /// <summary>
@@ -24,5 +28,20 @@ namespace OpenCover.Framework
         /// Show the unvisited classes/methods at the end of the coverage run
         /// </summary>
         bool ShowUnvisited { get; }
+
+        /// <summary>
+        /// Hide skipped methods from the report
+        /// </summary>
+        List<SkippedMethod> HideSkipped { get; }
+
+        /// <summary>
+        /// Set the threshold i.e. max visit count reporting
+        /// </summary>
+        ulong Threshold { get; }
+
+        /// <summary>
+        /// Set when tracing coverage by test has been enabled
+        /// </summary>
+        bool TraceByTest { get; }
     }
 }

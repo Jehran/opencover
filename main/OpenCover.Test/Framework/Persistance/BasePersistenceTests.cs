@@ -106,7 +106,9 @@ namespace OpenCover.Test.Framework.Persistance
         public void IsTracking_Fase_IfModuleSkipped()
         {
             // arrange
-            var module = new Module() { FullName = "ModulePath", SkippedDueTo = SkippedMethod.Filter };
+            var module = new Module() { FullName = "ModulePath"};
+            module.MarkAsSkipped(SkippedMethod.Filter);
+
             module.Aliases.Add("ModulePath");
             Instance.PersistModule(module);
 
@@ -377,6 +379,14 @@ namespace OpenCover.Test.Framework.Persistance
 
             // act
             Assert.DoesNotThrow(() => Instance.Commit());
+
+            Assert.AreEqual(0, Instance.CoverageSession.Summary.NumSequencePoints);
+            Assert.AreEqual(0, Instance.CoverageSession.Summary.VisitedSequencePoints);
+            Assert.AreEqual(0, Instance.CoverageSession.Summary.NumBranchPoints);
+            Assert.AreEqual(0, Instance.CoverageSession.Summary.VisitedBranchPoints);
+            Assert.AreEqual(0, Instance.CoverageSession.Summary.MaxCyclomaticComplexity);
+            Assert.AreEqual(0, Instance.CoverageSession.Summary.MinCyclomaticComplexity);
+
         }
 
 
@@ -388,6 +398,13 @@ namespace OpenCover.Test.Framework.Persistance
 
             // act
             Assert.DoesNotThrow(() => Instance.Commit());
+
+            Assert.AreEqual(0, Instance.CoverageSession.Modules[0].Summary.NumSequencePoints);
+            Assert.AreEqual(0, Instance.CoverageSession.Modules[0].Summary.VisitedSequencePoints);
+            Assert.AreEqual(0, Instance.CoverageSession.Modules[0].Summary.NumBranchPoints);
+            Assert.AreEqual(0, Instance.CoverageSession.Modules[0].Summary.VisitedBranchPoints);
+            Assert.AreEqual(0, Instance.CoverageSession.Modules[0].Summary.MaxCyclomaticComplexity);
+            Assert.AreEqual(0, Instance.CoverageSession.Modules[0].Summary.MinCyclomaticComplexity);
         }
 
         [Test]
@@ -398,6 +415,13 @@ namespace OpenCover.Test.Framework.Persistance
 
             // act
             Assert.DoesNotThrow(() => Instance.Commit());
+
+            Assert.AreEqual(0, Instance.CoverageSession.Modules[0].Classes[0].Summary.NumSequencePoints);
+            Assert.AreEqual(0, Instance.CoverageSession.Modules[0].Classes[0].Summary.VisitedSequencePoints);
+            Assert.AreEqual(0, Instance.CoverageSession.Modules[0].Classes[0].Summary.NumBranchPoints);
+            Assert.AreEqual(0, Instance.CoverageSession.Modules[0].Classes[0].Summary.VisitedBranchPoints);
+            Assert.AreEqual(0, Instance.CoverageSession.Modules[0].Classes[0].Summary.MaxCyclomaticComplexity);
+            Assert.AreEqual(0, Instance.CoverageSession.Modules[0].Classes[0].Summary.MinCyclomaticComplexity);
         }
 
         [Test]
@@ -408,6 +432,13 @@ namespace OpenCover.Test.Framework.Persistance
 
             // act
             Assert.DoesNotThrow(() => Instance.Commit());
+
+            Assert.AreEqual(0, Instance.CoverageSession.Modules[0].Classes[0].Methods[0].Summary.NumSequencePoints);
+            Assert.AreEqual(0, Instance.CoverageSession.Modules[0].Classes[0].Methods[0].Summary.VisitedSequencePoints);
+            Assert.AreEqual(0, Instance.CoverageSession.Modules[0].Classes[0].Methods[0].Summary.NumBranchPoints);
+            Assert.AreEqual(0, Instance.CoverageSession.Modules[0].Classes[0].Methods[0].Summary.VisitedBranchPoints);
+            Assert.AreEqual(1, Instance.CoverageSession.Modules[0].Classes[0].Methods[0].Summary.MaxCyclomaticComplexity);
+            Assert.AreEqual(1, Instance.CoverageSession.Modules[0].Classes[0].Methods[0].Summary.MinCyclomaticComplexity);
         }
 
         [Test]
@@ -423,6 +454,13 @@ namespace OpenCover.Test.Framework.Persistance
 
             // assert
             Assert.AreEqual(25, point.VisitCount);
+
+            Assert.AreEqual(0, Instance.CoverageSession.Modules[0].Classes[0].Methods[0].Summary.NumSequencePoints);
+            Assert.AreEqual(0, Instance.CoverageSession.Modules[0].Classes[0].Methods[0].Summary.VisitedSequencePoints);
+            Assert.AreEqual(0, Instance.CoverageSession.Modules[0].Classes[0].Methods[0].Summary.NumBranchPoints);
+            Assert.AreEqual(0, Instance.CoverageSession.Modules[0].Classes[0].Methods[0].Summary.VisitedBranchPoints);
+            Assert.AreEqual(1, Instance.CoverageSession.Modules[0].Classes[0].Methods[0].Summary.MaxCyclomaticComplexity);
+            Assert.AreEqual(1, Instance.CoverageSession.Modules[0].Classes[0].Methods[0].Summary.MinCyclomaticComplexity);
         }
 
         [Test]
@@ -439,6 +477,217 @@ namespace OpenCover.Test.Framework.Persistance
             // assert
             Assert.AreEqual(37, point.VisitCount);
 
+            Assert.AreEqual(1, Instance.CoverageSession.Modules[0].Classes[0].Methods[0].Summary.NumSequencePoints);
+            Assert.AreEqual(1, Instance.CoverageSession.Modules[0].Classes[0].Methods[0].Summary.VisitedSequencePoints);
+            Assert.AreEqual(1, Instance.CoverageSession.Modules[0].Classes[0].Methods[0].Summary.NumBranchPoints);
+            Assert.AreEqual(1, Instance.CoverageSession.Modules[0].Classes[0].Methods[0].Summary.VisitedBranchPoints);
+            Assert.AreEqual(1, Instance.CoverageSession.Modules[0].Classes[0].Methods[0].Summary.MaxCyclomaticComplexity);
+            Assert.AreEqual(1, Instance.CoverageSession.Modules[0].Classes[0].Methods[0].Summary.MinCyclomaticComplexity);
+        }
+
+        [Test]
+        public void Class_Summary_Aggregates_Methods()
+        {
+            // arrange
+            Instance.CoverageSession.Modules = new[]
+                {
+                    new Module()
+                        {
+                            Classes =
+                                new[]
+                                    {
+                                        new Class()
+                                            {
+                                                Methods =
+                                                    new[]
+                                                        {
+                                                            new Method()
+                                                                {
+                                                                    SequencePoints = new[] {new SequencePoint() {VisitCount = 1}},
+                                                                    CyclomaticComplexity = 1
+                                                                },
+                                                            new Method()
+                                                                {
+                                                                    SequencePoints = new[] {new SequencePoint() {VisitCount = 1}, new SequencePoint() {VisitCount = 0}},
+                                                                    CyclomaticComplexity = 10
+                                                                },
+                                                            new Method()
+                                                                {
+                                                                    SequencePoints = new[] {new SequencePoint() {VisitCount = 0}},
+                                                                    CyclomaticComplexity = 3                     
+                                                                }
+                                                        }
+                                            }
+                                    }
+                        }
+                };
+
+            // act
+            Assert.DoesNotThrow(() => Instance.Commit());
+
+            // assert
+
+            Assert.AreEqual(4, Instance.CoverageSession.Modules[0].Classes[0].Summary.NumSequencePoints);
+            Assert.AreEqual(2, Instance.CoverageSession.Modules[0].Classes[0].Summary.VisitedSequencePoints);
+            Assert.AreEqual(50, Instance.CoverageSession.Modules[0].Classes[0].Summary.SequenceCoverage);
+            Assert.AreEqual(3, Instance.CoverageSession.Modules[0].Classes[0].Summary.NumBranchPoints);
+            Assert.AreEqual(2, Instance.CoverageSession.Modules[0].Classes[0].Summary.VisitedBranchPoints);
+            Assert.AreEqual(66.67m, Instance.CoverageSession.Modules[0].Classes[0].Summary.BranchCoverage);
+            Assert.AreEqual(10, Instance.CoverageSession.Modules[0].Classes[0].Summary.MaxCyclomaticComplexity);
+            Assert.AreEqual(1, Instance.CoverageSession.Modules[0].Classes[0].Summary.MinCyclomaticComplexity);
+        }
+
+        [Test]
+        public void Module_Summary_Aggregates_Classes()
+        {
+            // arrange
+            Instance.CoverageSession.Modules = new[]
+                {
+                    new Module()
+                        {
+                            Classes =
+                                new[]
+                                    {
+                                        new Class()
+                                            {
+                                                Methods =
+                                                    new[]
+                                                        {
+                                                            new Method()
+                                                                {
+                                                                    SequencePoints = new[] {new SequencePoint() {VisitCount = 1}},
+                                                                    CyclomaticComplexity = 4
+                                                                },
+                                                        }
+                                            },
+                                        new Class()
+                                            {
+                                                Methods =
+                                                    new[]
+                                                        {
+                                                            new Method()
+                                                                {
+                                                                    SequencePoints = new[] {new SequencePoint() {VisitCount = 1}, new SequencePoint() {VisitCount = 0}},
+                                                                    CyclomaticComplexity = 17
+                                                                },
+                                                            new Method()
+                                                                {
+                                                                    SequencePoints = new[] {new SequencePoint() {VisitCount = 0}},
+                                                                    CyclomaticComplexity = 6
+                                                                }
+                                                        }
+                                            }
+                                    }
+                        }
+                };
+
+            // act
+            Assert.DoesNotThrow(() => Instance.Commit());
+
+            // assert
+
+            Assert.AreEqual(4, Instance.CoverageSession.Modules[0].Summary.NumSequencePoints);
+            Assert.AreEqual(2, Instance.CoverageSession.Modules[0].Summary.VisitedSequencePoints);
+            Assert.AreEqual(50, Instance.CoverageSession.Modules[0].Summary.SequenceCoverage);
+            Assert.AreEqual(3, Instance.CoverageSession.Modules[0].Summary.NumBranchPoints);
+            Assert.AreEqual(2, Instance.CoverageSession.Modules[0].Summary.VisitedBranchPoints);
+            Assert.AreEqual(66.67m, Instance.CoverageSession.Modules[0].Summary.BranchCoverage);
+            Assert.AreEqual(4, Instance.CoverageSession.Modules[0].Classes[0].Summary.MaxCyclomaticComplexity);
+            Assert.AreEqual(4, Instance.CoverageSession.Modules[0].Classes[0].Summary.MinCyclomaticComplexity);
+            Assert.AreEqual(17, Instance.CoverageSession.Modules[0].Classes[1].Summary.MaxCyclomaticComplexity);
+            Assert.AreEqual(6, Instance.CoverageSession.Modules[0].Classes[1].Summary.MinCyclomaticComplexity);
+            Assert.AreEqual(17, Instance.CoverageSession.Modules[0].Summary.MaxCyclomaticComplexity);
+            Assert.AreEqual(4, Instance.CoverageSession.Modules[0].Summary.MinCyclomaticComplexity);
+        }
+
+        [Test]
+        public void Session_Summary_Aggregates_Modules()
+        {
+            // arrange
+            Instance.CoverageSession.Modules = new[]
+                {
+                    new Module()
+                        {
+                            Classes =
+                                new[]
+                                    {
+                                        new Class()
+                                            {
+                                                Methods =
+                                                    new[]
+                                                        {
+                                                            new Method()
+                                                                {
+                                                                    SequencePoints = new[] {new SequencePoint() {VisitCount = 1}},
+                                                                    CyclomaticComplexity = 7
+                                                                },
+                                                        }
+                                            },
+                                    }
+                        },
+                    new Module()
+                        {
+                            Classes =
+                                new[]
+                                    {
+                                        new Class()
+                                            {
+                                                Methods =
+                                                    new[]
+                                                        {
+                                                            new Method()
+                                                                {
+                                                                    SequencePoints = new[] {new SequencePoint() {VisitCount = 1}, new SequencePoint() {VisitCount = 0}},
+                                                                    CyclomaticComplexity = 3
+                                                                },
+                                                            new Method()
+                                                                {
+                                                                    SequencePoints = new[] {new SequencePoint() {VisitCount = 0}},
+                                                                    CyclomaticComplexity = 6
+
+                                                                }
+                                                        }
+                                            }
+                                    }
+                        }
+                };
+
+            // act
+            Assert.DoesNotThrow(() => Instance.Commit());
+
+            // assert
+
+            Assert.AreEqual(4, Instance.CoverageSession.Summary.NumSequencePoints);
+            Assert.AreEqual(2, Instance.CoverageSession.Summary.VisitedSequencePoints);
+            Assert.AreEqual(50, Instance.CoverageSession.Summary.SequenceCoverage);
+            Assert.AreEqual(3, Instance.CoverageSession.Summary.NumBranchPoints);
+            Assert.AreEqual(2, Instance.CoverageSession.Summary.VisitedBranchPoints);
+            Assert.AreEqual(66.67m, Instance.CoverageSession.Summary.BranchCoverage);
+            Assert.AreEqual(7, Instance.CoverageSession.Modules[0].Summary.MaxCyclomaticComplexity);
+            Assert.AreEqual(7, Instance.CoverageSession.Modules[0].Summary.MinCyclomaticComplexity);
+            Assert.AreEqual(6, Instance.CoverageSession.Modules[1].Summary.MaxCyclomaticComplexity);
+            Assert.AreEqual(3, Instance.CoverageSession.Modules[1].Summary.MinCyclomaticComplexity);
+            Assert.AreEqual(7, Instance.CoverageSession.Summary.MaxCyclomaticComplexity);
+            Assert.AreEqual(3, Instance.CoverageSession.Summary.MinCyclomaticComplexity);
+        }
+
+        [Test]
+        public void Commit_With_WithSequencePointsOnly_NoVisits()
+        {
+            // arrange
+            var point = new SequencePoint();
+            Instance.CoverageSession.Modules = new[] { new Module() { Classes = new[] { new Class() { Methods = new[] { new Method() { SequencePoints = new[] { point } } } } } } };
+
+            // act
+            Assert.DoesNotThrow(() => Instance.Commit());
+
+            // assert
+            Assert.AreEqual(0, point.VisitCount);
+
+            Assert.AreEqual(1, Instance.CoverageSession.Modules[0].Classes[0].Methods[0].Summary.NumSequencePoints);
+            Assert.AreEqual(0, Instance.CoverageSession.Modules[0].Classes[0].Methods[0].Summary.VisitedSequencePoints);
+            Assert.AreEqual(1, Instance.CoverageSession.Modules[0].Classes[0].Methods[0].Summary.NumBranchPoints);
+            Assert.AreEqual(0, Instance.CoverageSession.Modules[0].Classes[0].Methods[0].Summary.VisitedBranchPoints);
         }
 
         [Test]
@@ -454,6 +703,11 @@ namespace OpenCover.Test.Framework.Persistance
 
             // assert
             Assert.AreEqual(42, point.VisitCount);
+
+            Assert.AreEqual(0, Instance.CoverageSession.Modules[0].Classes[0].Methods[0].Summary.NumSequencePoints);
+            Assert.AreEqual(0, Instance.CoverageSession.Modules[0].Classes[0].Methods[0].Summary.VisitedSequencePoints);
+            Assert.AreEqual(1, Instance.CoverageSession.Modules[0].Classes[0].Methods[0].Summary.NumBranchPoints);
+            Assert.AreEqual(1, Instance.CoverageSession.Modules[0].Classes[0].Methods[0].Summary.VisitedBranchPoints);
 
         }
 
@@ -506,5 +760,238 @@ namespace OpenCover.Test.Framework.Persistance
             Assert.IsTrue(result);
             Assert.AreEqual(5678, trackedId);
         }
+
+        readonly SkippedMethod[] _skippedReasonsModules = new[] { SkippedMethod.Filter, SkippedMethod.MissingPdb, };
+
+        [Test]
+        public void HideSkipped_With_X_Removes_SkippedModules([ValueSource("_skippedReasonsModules")]SkippedMethod reason)
+        {
+            // arrange
+            Container.GetMock<ICommandLine>()
+                .SetupGet(x => x.HideSkipped)
+                .Returns(new List<SkippedMethod>(){reason});
+
+            var module = new Module() {FullName = "Skipped"};
+            module.MarkAsSkipped(reason);
+            Instance.PersistModule(module);
+            Instance.PersistModule(new Module() { FullName = "Keep" });
+
+            // act
+            Instance.Commit();
+
+            // assert
+            Assert.AreEqual(1, Instance.CoverageSession.Modules.Count());
+            Assert.AreEqual("Keep", Instance.CoverageSession.Modules[0].FullName);
+        }
+
+        readonly SkippedMethod[] _skippedReasonsClasses = new[] { SkippedMethod.Filter, SkippedMethod.File, SkippedMethod.Attribute, };
+
+        [Test]
+        public void HideSkipped_With_X_Removes_SkippedClasses([ValueSource("_skippedReasonsClasses")]SkippedMethod reason)
+        {
+            // arrange
+            Container.GetMock<ICommandLine>()
+                .SetupGet(x => x.HideSkipped)
+                .Returns(new List<SkippedMethod>() { reason });
+
+            var @class = new Class() {FullName = "Skipped"};
+            @class.MarkAsSkipped(reason);
+            Instance.PersistModule(new Module()
+            {
+                FullName = "Keep",
+                Classes = new[]
+                        {
+                            @class,
+                            new Class() {FullName = "KeepClass", Methods = new[]{new Method()}},
+                        }
+            });
+
+            // act
+            Instance.Commit();
+
+            // assert
+            Assert.AreEqual(1, Instance.CoverageSession.Modules[0].Classes.Count());
+            Assert.AreEqual("KeepClass", Instance.CoverageSession.Modules[0].Classes[0].FullName);
+        }
+
+        /// <summary>
+        /// NOTE: A (compiler) generated method will not have any file references 
+        /// </summary>
+        [Test]
+        public void InstrumentationPoints_Of_CompilerGeneratedMethods_Belonging_To_Classes_WhereAllOtherMethodsAreSkipped_AreRemoved()
+        {
+            // arrange
+            var point = new InstrumentationPoint() { IsSkipped = false };
+            var module = new Module()
+                {
+                    FullName = "Keep",
+                    Classes = new[]
+                        {
+                            new Class() {Methods = new[] {new Method() {MethodPoint = point}, new Method()}},
+                            new Class()
+                                {
+                                    Methods = new[]
+                                        {
+                                            new Method()
+                                                {
+                                                    MethodPoint = new InstrumentationPoint() {IsSkipped = false},
+                                                    FileRef = new FileRef()
+                                                },
+                                            new Method()
+                                        }
+                                },
+                        }
+                };
+
+            module.Classes[0].Methods[1].MarkAsSkipped(SkippedMethod.File);
+            module.Classes[1].Methods[1].MarkAsSkipped(SkippedMethod.File);
+
+            Instance.PersistModule(module);
+
+            // act
+            Instance.Commit();
+
+            // assert
+            Assert.IsNull(Instance.CoverageSession.Modules[0].Classes[0].Methods[0].MethodPoint);
+            Assert.IsTrue(point.IsSkipped);
+            Assert.IsFalse(Instance.CoverageSession.Modules[0].Classes[1].Methods[0].MethodPoint.IsSkipped);
+        }
+
+        readonly SkippedMethod[] _skippedReasonsMethods = new[] { SkippedMethod.File, SkippedMethod.Attribute, };
+
+        [Test]
+        public void HideSkipped_With_X_Removes_SkippedMethods([ValueSource("_skippedReasonsMethods")]SkippedMethod reason)
+        {
+            // arrange
+            Container.GetMock<ICommandLine>()
+                .SetupGet(x => x.HideSkipped)
+                .Returns(new List<SkippedMethod>() { reason });
+
+            var method = new Method() {Name = "SkippedMethod", FileRef = new FileRef()};
+            method.MarkAsSkipped(reason);
+
+            var module = new Module()
+                {
+                    FullName = "Keep",
+                    Classes = new[]
+                        {
+                            new Class()
+                                {
+                                    FullName = "RemoveClassThoughSkippedAttribute",
+                                    Methods = new[] { method }
+                                },
+                            new Class()
+                                {
+                                    FullName = "KeepClass",
+                                    Methods = new[] { method, new Method() {Name = "KeepMethod", FileRef = new FileRef()}}
+                                }
+                        }
+                };
+
+            module.Classes[0].MarkAsSkipped(SkippedMethod.Attribute);
+
+            Instance.PersistModule(module);
+
+            // act
+            Instance.Commit();
+
+            // assert
+            Assert.AreEqual(1, Instance.CoverageSession.Modules[0].Classes.Count());
+            Assert.AreEqual(1, Instance.CoverageSession.Modules[0].Classes[0].Methods.Count());
+            Assert.AreEqual("KeepMethod", Instance.CoverageSession.Modules[0].Classes[0].Methods[0].Name);
+        }
+
+        [Test]
+        public void HideSkipped_With_File_Removes_EmptyClasses()
+        {
+            // arrange
+            Container.GetMock<ICommandLine>()
+                .SetupGet(x => x.HideSkipped)
+                .Returns(new List<SkippedMethod>() { SkippedMethod.File });
+
+            var module = new Module()
+            {
+                FullName = "Keep",
+                Classes = new[]
+                        {
+                            new Class()
+                                {
+                                    FullName = "KeepClassThoughSkippedAttribute",
+                                    Methods = new[] {new Method(){FileRef = new FileRef()}}
+                                },
+                            new Class()
+                                {
+                                    FullName = "RemoveClassThoughSkippedAttribute",
+                                    Methods = new[] {new Method() {Name = "SkippedMethod", FileRef = new FileRef()}}
+                                },
+                            new Class()
+                                {
+                                    FullName = "KeepClass",
+                                    Methods =
+                                        new[]
+                                            {
+                                                new Method(){Name = "SkippedMethod", FileRef = new FileRef()},
+                                                new Method() {Name = "KeepMethod", FileRef = new FileRef()}
+                                            }
+                                }
+                        }
+            };
+
+            module.Classes[0].MarkAsSkipped(SkippedMethod.Attribute);
+            module.Classes[1].MarkAsSkipped(SkippedMethod.Attribute);
+            module.Classes[1].Methods[0].MarkAsSkipped(SkippedMethod.File);
+            module.Classes[2].Methods[0].MarkAsSkipped(SkippedMethod.File);
+
+            Instance.PersistModule(module);
+
+            // act
+            Instance.Commit();
+
+            // assert
+            Assert.AreEqual(2, Instance.CoverageSession.Modules[0].Classes.Count());
+            Assert.AreEqual(1, Instance.CoverageSession.Modules[0].Classes[1].Methods.Count());
+            Assert.AreEqual("KeepMethod", Instance.CoverageSession.Modules[0].Classes[1].Methods[0].Name);
+        }
+
+        [Test]
+        public void HideSkipped_With_File_Removes_UnreferencedFiles()
+        {
+            // arrange
+            Container.GetMock<ICommandLine>()
+                .SetupGet(x => x.HideSkipped)
+                .Returns(new List<SkippedMethod>() { SkippedMethod.File });
+
+            var method = new Method() {Name = "SkippedMethod", FileRef = new FileRef() {UniqueId = 2}};
+            method.MarkAsSkipped(SkippedMethod.File);
+
+            Instance.PersistModule(new Module()
+            {
+                FullName = "Keep",
+                Files = new []{new File(){UniqueId = 1, FullPath = "KeepFile"}, new File(){UniqueId = 2} },
+                Classes = new[]
+                        {
+                            new Class()
+                                {
+                                    FullName = "KeepClass",
+                                    Methods =
+                                        new[]
+                                            {
+                                                method,
+                                                new Method() {Name = "KeepMethod", FileRef = new FileRef(){UniqueId = 1}}
+                                            }
+                                }
+                        }
+            });
+
+            Assert.AreEqual(2, Instance.CoverageSession.Modules[0].Files.Count());
+
+            // act
+            Instance.Commit();
+
+            // assert
+            Assert.AreEqual(1, Instance.CoverageSession.Modules[0].Files.Count());
+            Assert.AreEqual("KeepFile", Instance.CoverageSession.Modules[0].Files[0].FullPath);
+        }
+
     }
 }

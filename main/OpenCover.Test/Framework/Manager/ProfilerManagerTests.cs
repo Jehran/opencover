@@ -1,12 +1,9 @@
 ﻿using System;
-using System.Collections.Generic;
 using System.Collections.Specialized;
-using System.Linq;
-using System.Text;
 using System.Threading;
-using System.Threading.Tasks;
 using Moq;
 using NUnit.Framework;
+using OpenCover.Framework;
 using OpenCover.Framework.Communication;
 using OpenCover.Framework.Manager;
 using OpenCover.Framework.Persistance;
@@ -18,21 +15,21 @@ namespace OpenCover.Test.Framework.Manager
     public class ProfilerManagerTests :
         UnityAutoMockContainerBase<IProfilerManager, ProfilerManager>
     {
-        private IMemoryManager manager;
+        private IMemoryManager _manager;
+        private string _key;
 
-        [SetUp]
-        public void Setup()
+        public override void OnSetup()
         {
-            manager = new MemoryManager();
-            manager.Initialise("Local", "ABC");
-            manager.AllocateMemoryBuffer(65536, 0);
-            Container.RegisterInstance(manager);
+            _key = (new Random().Next()).ToString();
+            _manager = new MemoryManager();
+            _manager.Initialise("Local", _key);
+            _manager.AllocateMemoryBuffer(65536, 0);
+            Container.RegisterInstance(_manager);
         }
 
-        [TearDown]
-        public void TearDown()
+        public override void OnTeardown()
         {
-            manager.Dispose();
+            _manager.Dispose();
         }
 
         [Test]
@@ -42,10 +39,68 @@ namespace OpenCover.Test.Framework.Manager
             var dict = new StringDictionary();
 
             // act
-            RunProcess(dict, () => { });
+            RunSimpleProcess(dict);
 
             // assert
             Assert.NotNull(dict[@"OpenCover_Profiler_Key"]);
+        }
+
+        [Test]
+        public void Manager_Adds_Default_Threshold_EnvironmentVariable()
+        {
+            // arrange
+            var dict = new StringDictionary();
+
+            // act
+            RunSimpleProcess(dict);
+
+            // assert
+            Assert.NotNull(dict[@"OpenCover_Profiler_Threshold"]);
+            Assert.AreEqual("0", dict[@"OpenCover_Profiler_Threshold"]);
+        }
+
+        [Test]
+        public void Manager_Adds_Supplied_Threshold_EnvironmentVariable()
+        {
+            // arrange
+            var dict = new StringDictionary();
+            Container.GetMock<ICommandLine>().SetupGet(x => x.Threshold).Returns(500);
+
+            // act
+            RunSimpleProcess(dict);
+
+            // assert
+            Assert.NotNull(dict[@"OpenCover_Profiler_Threshold"]);
+            Assert.AreEqual("500", dict[@"OpenCover_Profiler_Threshold"]);
+        }
+
+        [Test]
+        public void Manager_Adds_TraceByTest_EnvironmentVariable_When_Tracing_Enabled()
+        {
+            // arrange
+            var dict = new StringDictionary();
+            Container.GetMock<ICommandLine>().SetupGet(x => x.TraceByTest).Returns(true);
+
+            // act
+            RunSimpleProcess(dict);
+
+            // assert
+            Assert.NotNull(dict[@"OpenCover_Profiler_TraceByTest"]);
+            Assert.AreEqual("1", dict[@"OpenCover_Profiler_TraceByTest"]);
+        }
+
+        [Test]
+        public void Manager_DoesNotAdd_TraceByTest_EnvironmentVariable_When_Tracing_Disabled()
+        {
+            // arrange
+            var dict = new StringDictionary();
+            Container.GetMock<ICommandLine>().SetupGet(x => x.TraceByTest).Returns(false);
+
+            // act
+            RunSimpleProcess(dict);
+
+            // assert
+            Assert.IsNull(dict[@"OpenCover_Profiler_TraceByTest"]);
         }
 
         [Test]
@@ -55,10 +110,11 @@ namespace OpenCover.Test.Framework.Manager
             var dict = new StringDictionary();
 
             // act
-            RunProcess(dict, () => { });
+            RunSimpleProcess(dict);
 
             // assert
             Assert.AreEqual("{1542C21D-80C3-45E6-A56C-A9C1E4BEB7B8}".ToUpper(), dict[@"Cor_Profiler"].ToUpper());
+            Assert.AreEqual("{1542C21D-80C3-45E6-A56C-A9C1E4BEB7B8}".ToUpper(), dict[@"CoreClr_Profiler"].ToUpper());
         }
 
         [Test]
@@ -68,43 +124,113 @@ namespace OpenCover.Test.Framework.Manager
             var dict = new StringDictionary();
 
             // act
-            RunProcess(dict, () => { });
+            RunSimpleProcess(dict);
 
             // assert
             Assert.AreEqual("1", dict[@"Cor_Enable_Profiling"]);
+            Assert.AreEqual("1", dict[@"CoreClr_Enable_Profiling"]);
         }
 
         [Test, RequiresMTA]
-        public void Manager_Handles_StandardMessageEvent()
+        public void Manager_Handles_Shared_StandardMessageEvent()
         {
             // arrange
-            Container.GetMock<IMessageHandler>()
-                .Setup(x => x.StandardMessage(It.IsAny<MSG_Type>(), It.IsAny<IntPtr>(), It.IsAny<Action<int>>()))
-                .Callback<MSG_Type, IntPtr, Action<int>>((t, p, action) => { });
+            EventWaitHandle standardMessageReady = null;
+            EventWaitHandle offloadComplete = new AutoResetEvent(false);
+
+            Container.GetMock<ICommunicationManager>()
+                     .Setup(x => x.HandleCommunicationBlock(It.IsAny<IManagedCommunicationBlock>(), It.IsAny<Action<IManagedCommunicationBlock, IManagedMemoryBlock>>()))
+                     .Callback(() =>
+                         {
+                             if (standardMessageReady != null) 
+                                 standardMessageReady.Reset();
+                             offloadComplete.Set();
+                         });
 
             // act
             var dict = new StringDictionary();
-
-            Instance.RunProcess(e =>
-            {
-                e(dict);
-
-                var standardMessageReady = new EventWaitHandle(false, EventResetMode.ManualReset,
-                    @"Local\OpenCover_Profiler_Communication_SendData_Event_" + dict[@"OpenCover_Profiler_Key"]);
-
-                standardMessageReady.Set();
-
-                var standardMessageChunk = new EventWaitHandle(false, EventResetMode.ManualReset,
-                   @"Local\OpenCover_Profiler_Communication_ChunkData_Event_" + dict[@"OpenCover_Profiler_Key"]);
-
-                standardMessageChunk.Set();
-
-                Thread.Sleep(new TimeSpan(0, 0, 0, 0, 100));
-            }, false);
+            RunProcess(dict, standardMessageDataReady => { standardMessageReady = standardMessageDataReady; }, () => 
+                {
+                    offloadComplete.WaitOne();
+                });
 
             // assert
-            Container.GetMock<IMessageHandler>()
-                .Verify(x => x.StandardMessage(It.IsAny<MSG_Type>(), It.IsAny<IntPtr>(), It.IsAny<Action<int>>()), Times.Once());
+            Container.GetMock<ICommunicationManager>()
+                .Verify(x => x.HandleCommunicationBlock(It.IsAny<IManagedCommunicationBlock>(), 
+                    It.IsAny<Action<IManagedCommunicationBlock, IManagedMemoryBlock>>()), Times.Once());
+        }
+
+        [Test, RequiresMTA]
+        public void Manager_Handles_Profiler_StandardMessageEvent()
+        {
+            // arrange
+            EventWaitHandle standardMessageReady = null;
+            EventWaitHandle offloadComplete = new AutoResetEvent(false);
+
+            IManagedCommunicationBlock mcb = new MemoryManager.ManagedCommunicationBlock("Local", _key, 100, -5);
+            IManagedMemoryBlock mmb = new MemoryManager.ManagedMemoryBlock("Local", _key, 100, -5);
+
+            Container.GetMock<ICommunicationManager>()
+                     .Setup(x => x.HandleCommunicationBlock(It.IsAny<IManagedCommunicationBlock>(), It.IsAny<Action<IManagedCommunicationBlock, IManagedMemoryBlock>>()))
+                     .Callback<IManagedCommunicationBlock, Action<IManagedCommunicationBlock, IManagedMemoryBlock>>((_, offload) =>
+                     {
+                         if (standardMessageReady != null)
+                             standardMessageReady.Reset();
+
+                         offload(mcb, mmb);
+
+                         offloadComplete.Set();
+                     });
+
+            // act
+            var dict = new StringDictionary();
+            RunProcess(dict, standardMessageDataReady => { standardMessageReady = standardMessageDataReady; }, () =>
+                {
+                    offloadComplete.WaitOne();
+                    mmb.ProfilerHasResults.Set();
+                    mmb.ProfilerHasResults.Reset();
+                });
+
+            // assert
+            Container.GetMock<ICommunicationManager>()
+                .Verify(x => x.HandleMemoryBlock(It.IsAny<IManagedMemoryBlock>()), Times.Once());
+        }
+
+        [Test, RequiresMTA]
+        public void Manager_Handles_Profiler_ResultsReady()
+        {
+            // arrange
+            EventWaitHandle standardMessageReady = null;
+            EventWaitHandle offloadComplete = new AutoResetEvent(false);
+
+            IManagedCommunicationBlock mcb = new MemoryManager.ManagedCommunicationBlock("Local", _key, 100, 1);
+            IManagedMemoryBlock mmb = new MemoryManager.ManagedMemoryBlock("Local", _key, 100, 1);
+
+            Container.GetMock<ICommunicationManager>()
+                     .Setup(x => x.HandleCommunicationBlock(It.IsAny<IManagedCommunicationBlock>(), It.IsAny<Action<IManagedCommunicationBlock, IManagedMemoryBlock>>()))
+                     .Callback<IManagedCommunicationBlock, Action<IManagedCommunicationBlock, IManagedMemoryBlock>>((_, offload) =>
+                     {
+                         if (standardMessageReady != null)
+                             standardMessageReady.Reset();
+
+                         offload(mcb, mmb);
+
+                         offloadComplete.Set();
+                     });
+
+            // act
+            var dict = new StringDictionary();
+            RunProcess(dict, standardMessageDataReady => { standardMessageReady = standardMessageDataReady; }, () =>
+                {
+                    offloadComplete.WaitOne();
+                    mcb.ProfilerRequestsInformation.Set();
+                    mcb.ProfilerRequestsInformation.Reset();
+                });
+
+            // assert
+            Container.GetMock<ICommunicationManager>()
+                .Verify(x => x.HandleCommunicationBlock(It.IsAny<IManagedCommunicationBlock>(),
+                    It.IsAny<Action<IManagedCommunicationBlock, IManagedMemoryBlock>>()), Times.Exactly(2));
         }
 
         [Test]
@@ -114,26 +240,42 @@ namespace OpenCover.Test.Framework.Manager
             var dict = new StringDictionary();
 
             // act
-            RunProcess(dict, () => { });
+            RunSimpleProcess(dict);
 
             // assert
-            Container.GetMock<IPersistance>().Verify(x => x.SaveVisitData(It.IsAny<byte[]>()), Times.Exactly(2));
+            Container.GetMock<IPersistance>().Verify(x => x.SaveVisitData(It.IsAny<byte[]>()), Times.Once());
         }
 
-        private void RunProcess(StringDictionary dict, Action doExtra)
+        private void RunSimpleProcess(StringDictionary dict)
         {
+            RunProcess(dict, standardMessageDataReady => { }, () => { });
+        }
+
+        private void RunProcess(StringDictionary dict, Action<EventWaitHandle> getStandardMessageDataReady, Action doExtraWork)
+        {
+            // arrange
+            EventWaitHandle standardMessageDataReady = null;
+            Container.GetMock<ICommunicationManager>()
+                     .Setup(x => x.HandleMemoryBlock(It.IsAny<IManagedMemoryBlock>()))
+                     .Returns(() =>
+                         {
+                             if (standardMessageDataReady != null)
+                                 standardMessageDataReady.Reset();
+                             return new byte[4];
+                         });
+
             Instance.RunProcess(e =>
             {
                 e(dict);
 
-                var standardMessageDataReady = new EventWaitHandle(false, EventResetMode.ManualReset,
-                    @"Local\OpenCover_Profiler_Communication_SendResults_Event_ABC0");
+                standardMessageDataReady = new EventWaitHandle(false, EventResetMode.ManualReset,
+                    @"Local\OpenCover_Profiler_Communication_SendData_Event_" + dict[@"OpenCover_Profiler_Key"] + "-1");
+
+                getStandardMessageDataReady(standardMessageDataReady);
 
                 standardMessageDataReady.Set();
 
-                Thread.Sleep(new TimeSpan(0, 0, 0, 0, 100));
-
-                doExtra();
+                doExtraWork();
 
             }, false);
         }

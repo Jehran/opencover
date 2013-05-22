@@ -283,7 +283,9 @@ void Method::ReadSections()
                     pSection->m_handlerStart = GetInstructionAtOffset(handlerStart);
                     pSection->m_handlerEnd = GetInstructionAtOffset(handlerStart + handlerEnd, 
                         (type & COR_ILEXCEPTION_CLAUSE_FINALLY) == COR_ILEXCEPTION_CLAUSE_FINALLY,
-                        (type & COR_ILEXCEPTION_CLAUSE_FAULT) == COR_ILEXCEPTION_CLAUSE_FAULT);
+                        (type & COR_ILEXCEPTION_CLAUSE_FAULT) == COR_ILEXCEPTION_CLAUSE_FAULT,
+						(type & COR_ILEXCEPTION_CLAUSE_FILTER) == COR_ILEXCEPTION_CLAUSE_FILTER,
+						(type & COR_ILEXCEPTION_CLAUSE_NONE) == COR_ILEXCEPTION_CLAUSE_NONE);
                     if (filterStart!=0)
                     {
                         pSection->m_filterStart = GetInstructionAtOffset(filterStart);
@@ -321,7 +323,9 @@ void Method::ReadSections()
                     pSection->m_handlerStart = GetInstructionAtOffset(handlerStart);
                     pSection->m_handlerEnd = GetInstructionAtOffset(handlerStart + handlerEnd, 
                         (type & COR_ILEXCEPTION_CLAUSE_FINALLY) == COR_ILEXCEPTION_CLAUSE_FINALLY,
-                        (type & COR_ILEXCEPTION_CLAUSE_FAULT) == COR_ILEXCEPTION_CLAUSE_FAULT);
+                        (type & COR_ILEXCEPTION_CLAUSE_FAULT) == COR_ILEXCEPTION_CLAUSE_FAULT,
+						(type & COR_ILEXCEPTION_CLAUSE_FILTER) == COR_ILEXCEPTION_CLAUSE_FILTER,
+						(type & COR_ILEXCEPTION_CLAUSE_NONE) == COR_ILEXCEPTION_CLAUSE_NONE);
                     if (filterStart!=0)
                     {
                         pSection->m_filterStart = GetInstructionAtOffset(filterStart);
@@ -371,7 +375,7 @@ Instruction * Method::GetInstructionAtOffset(long offset)
 ///            }
 ///     }
 /// </example>
-Instruction * Method::GetInstructionAtOffset(long offset, bool isFinally, bool isFault)
+Instruction * Method::GetInstructionAtOffset(long offset, bool isFinally, bool isFault, bool isFilter, bool isTyped)
 {
     for (auto it = m_instructions.begin(); it != m_instructions.end() ; ++it)
     {
@@ -381,13 +385,13 @@ Instruction * Method::GetInstructionAtOffset(long offset, bool isFinally, bool i
         }
     }
 
-    if (isFinally || isFault)
+    if (isFinally || isFault || isFilter || isTyped)
     {
         Instruction *pLast = m_instructions.back();
         OperationDetails &details = Operations::m_mapNameOperationDetails[pLast->m_operation];
         if (offset == pLast->m_offset + details.length + details.operandSize)
         {
-            // add a code label to hang the try/finally handler end off
+            // add a code label to hang the clause handler end off
             Instruction *pInstruction = new Instruction(CEE_CODE_LABEL); 
             pInstruction->m_offset = offset;
             m_instructions.push_back(pInstruction);
@@ -638,21 +642,50 @@ long Method::GetMethodSize()
     return size;
 }
 
+/// <summary>Test if a method has already been instrumented by comparing a list of instructions at that location</summary>
+/// <param name="offset">The offset to look for.</param>
+/// <param name="instructions">The list of instructions to compare with at that location.</param>
+bool Method::IsInstrumented(long offset, const InstructionList &instructions)
+{
+    bool foundInstructionAtOffset = false;
+    for (auto it = m_instructions.begin(); it != m_instructions.end(); ++it)
+    {
+		if ((*it)->m_origOffset == offset)
+        {
+			foundInstructionAtOffset = true;
+			for (auto it2 = instructions.begin(); it2 != instructions.end(); ++it2, ++it)
+			{
+				if (!(*it2)->Equivalent(*(*it))) 
+					return false;
+			}
+			break;
+        }
+    } 
+
+	return foundInstructionAtOffset;
+}
+
 /// <summary>Insert a sequence of instructions at a specific offset</summary>
 /// <param name="offset">The offset to look for.</param>
 /// <param name="instructions">The list of instructions to insert at that location.</param>
 /// <remarks>Original pointer references are maintained by inserting the sequence of instructions 
 /// after the intended target and then using a copy operator on the <c>Instruction</c> objects to 
 /// copy the data between them</remarks>
-void Method::InsertInstructionsAtOffset(long offset, InstructionList &instructions)
+void Method::InsertInstructionsAtOffset(long offset, const InstructionList &instructions)
 {
+	InstructionList clone;
+    for (auto it = instructions.begin(); it != instructions.end(); ++it)
+	{
+		clone.push_back(new Instruction(*(*it)));
+	}
+
     long actualOffset = 0;
     for (auto it = m_instructions.begin(); it != m_instructions.end(); ++it)
     {
         if ((*it)->m_offset == offset)
         {
             actualOffset = (*it)->m_offset;
-            m_instructions.insert(++it, instructions.begin(), instructions.end());
+            m_instructions.insert(++it, clone.begin(), clone.end());
             break;
         }
     } 
@@ -662,7 +695,7 @@ void Method::InsertInstructionsAtOffset(long offset, InstructionList &instructio
         if ((*it)->m_origOffset == offset)
         {            
             Instruction orig = *(*it);
-            for (unsigned int i=0;i<instructions.size();i++)
+            for (unsigned int i=0;i<clone.size();i++)
             {
                 auto temp = it++;
                 *(*temp) = *(*it);
@@ -682,15 +715,21 @@ void Method::InsertInstructionsAtOffset(long offset, InstructionList &instructio
 /// <remarks>Original pointer references are maintained by inserting the sequence of instructions 
 /// after the intended target and then using a copy operator on the <c>Instruction</c> objects to 
 /// copy the data between them</remarks>
-void Method::InsertInstructionsAtOriginalOffset(long origOffset, InstructionList &instructions)
+void Method::InsertInstructionsAtOriginalOffset(long origOffset, const InstructionList &instructions)
 {
-    long actualOffset = 0;
+	InstructionList clone;
+    for (auto it = instructions.begin(); it != instructions.end(); ++it)
+	{
+		clone.push_back(new Instruction(*(*it)));
+	}
+
+	long actualOffset = 0;
     for (auto it = m_instructions.begin(); it != m_instructions.end(); ++it)
     {
         if ((*it)->m_origOffset == origOffset)
         {
             actualOffset = (*it)->m_offset;
-            m_instructions.insert(++it, instructions.begin(), instructions.end());
+            m_instructions.insert(++it, clone.begin(), clone.end());
             break;
         }
     } 
@@ -702,7 +741,7 @@ void Method::InsertInstructionsAtOriginalOffset(long origOffset, InstructionList
             if ((*it)->m_origOffset == origOffset)
             {            
                 Instruction orig = *(*it);
-                for (unsigned int i=0;i<instructions.size();i++)
+                for (unsigned int i=0;i<clone.size();i++)
                 {
                     auto temp = it++;
                     *(*temp) = *(*it);
@@ -712,6 +751,7 @@ void Method::InsertInstructionsAtOriginalOffset(long origOffset, InstructionList
             }
         }
     }
+
     RecalculateOffsets();
     return;
 }

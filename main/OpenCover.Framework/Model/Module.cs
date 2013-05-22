@@ -14,7 +14,7 @@ namespace OpenCover.Framework.Model
     /// <summary>
     /// The details of a module
     /// </summary>
-    public class Module : SkippedEntity
+    public class Module : SummarySkippedEntity
     {
         /// <summary>
         /// simple constructor
@@ -60,5 +60,10 @@ namespace OpenCover.Framework.Model
         /// </summary>
         [XmlAttribute("hash")]
         public string ModuleHash { get; set; }
+
+        public override void MarkAsSkipped(SkippedMethod reason)
+        {
+            SkippedDueTo = reason;
+        }
     }
 }

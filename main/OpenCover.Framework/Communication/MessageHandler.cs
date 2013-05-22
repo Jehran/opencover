@@ -16,7 +16,7 @@ namespace OpenCover.Framework.Communication
 {
     public interface IMessageHandler
     {
-        int StandardMessage(MSG_Type msgType, IntPtr pinnedMemory, Action<int> chunkReady);
+        int StandardMessage(MSG_Type msgType, IManagedCommunicationBlock mcb, Action<int, IManagedCommunicationBlock> chunkReady, Action<IManagedCommunicationBlock, IManagedMemoryBlock> offloadHandling);
         int ReadSize { get; }
         void Complete();
     }
@@ -37,8 +37,10 @@ namespace OpenCover.Framework.Communication
             _memoryManager = memoryManager;
         }
 
-        public int StandardMessage(MSG_Type msgType, IntPtr pinnedMemory, Action<int> chunkReady)
+        // TODO: change pinnedMemory to an byte[], pass in mcb as well
+        public int StandardMessage(MSG_Type msgType, IManagedCommunicationBlock mcb, Action<int, IManagedCommunicationBlock> chunkReady, Action<IManagedCommunicationBlock, IManagedMemoryBlock> offloadHandling)
         {
+            IntPtr pinnedMemory = mcb.PinnedDataCommunication.AddrOfPinnedObject();
             var writeSize = 0;
             switch (msgType)
             {
@@ -82,7 +84,7 @@ namespace OpenCover.Framework.Communication
 
                             if (responseCSP.more)
                             {
-                                chunkReady(writeSize);
+                                chunkReady(writeSize, mcb);
                                 num -= GSP_BufSize;
                             }
                         } while (responseCSP.more);
@@ -120,7 +122,7 @@ namespace OpenCover.Framework.Communication
 
                             if (responseCSP.more)
                             {
-                                chunkReady(writeSize);
+                                chunkReady(writeSize, mcb);
                                 num -= GBP_BufSize;
                             }
                         } while (responseCSP.more);
@@ -143,10 +145,15 @@ namespace OpenCover.Framework.Communication
                 case MSG_Type.MSG_AllocateMemoryBuffer:
                     {
                         var msgAB = _marshalWrapper.PtrToStructure<MSG_AllocateBuffer_Request>(pinnedMemory);
-                        _memoryManager.AllocateMemoryBuffer(msgAB.bufferSize, _bufferId);
-                        var responseAB = new MSG_AllocateBuffer_Response {allocated = true, bufferId = _bufferId++};
+                        
+                        var block = _memoryManager.AllocateMemoryBuffer(msgAB.bufferSize, _bufferId);
+
+                        var responseAB = new MSG_AllocateBuffer_Response {allocated = true, bufferId = _bufferId };
                         _marshalWrapper.StructureToPtr(responseAB, pinnedMemory, false);
                         writeSize = Marshal.SizeOf(typeof(MSG_AllocateBuffer_Response));
+                        _bufferId++;
+
+                        offloadHandling(block.Item1, block.Item2);
                     }
                     break;
             }

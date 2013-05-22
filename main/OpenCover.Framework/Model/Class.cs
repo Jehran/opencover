@@ -14,8 +14,11 @@ namespace OpenCover.Framework.Model
     /// <summary>
     /// An entity that contains methods
     /// </summary>
-    public class Class : SkippedEntity
+    public class Class : SummarySkippedEntity
     {
+        /// <summary>
+        /// instantiate
+        /// </summary>
         public Class()
         {
             Methods = new Method[0];
@@ -34,5 +37,9 @@ namespace OpenCover.Framework.Model
         /// </summary>
         public Method[] Methods { get; set; }
 
+        public override void MarkAsSkipped(SkippedMethod reason)
+        {
+            SkippedDueTo = reason;
+        }
     }
 }

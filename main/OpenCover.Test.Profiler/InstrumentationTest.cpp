@@ -680,3 +680,63 @@ TEST_F(InstrumentationTest, CanPopulateSuppliedILMapSize)
 
     delete [] map;
 }
+
+TEST_F(InstrumentationTest, WillAddCodeLabelWhenClauseExtendsLastOpcode)
+{
+    BYTE data[] = {
+        0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00,      
+        0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00,       
+        0xFE, 0x1A, // CEE_RETHROW
+        0x00, 0x00, // align
+        0x01, 0x0C, 0x00, 0x00,
+        0x00, 0x00, 0x01, 0x00, 0x11, 0x12, 0x00, 0x08, 0x00, 0x00, 0x00, 0x00}; 
+
+	DWORD codeSize = 26;
+
+    IMAGE_COR_ILMETHOD_FAT * pHeader = (IMAGE_COR_ILMETHOD_FAT*)data;
+    pHeader->Flags = CorILMethod_FatFormat | CorILMethod_MoreSects;
+    pHeader->CodeSize = codeSize;
+    pHeader->Size = 3;
+
+    Method instrument((IMAGE_COR_ILMETHOD*)data);
+
+	ASSERT_EQ(codeSize, (DWORD)instrument.GetCodeSize()); // no change in size	
+	ASSERT_EQ(CEE_CODE_LABEL, instrument.m_instructions.back()->m_operation);
+}
+
+TEST_F(InstrumentationTest, CanIdentifyInstrumentedMethods)
+{
+    BYTE data[] = {(0x02 << 2) + CorILMethod_TinyFormat, 
+        CEE_NOP, CEE_RET};
+
+    Method instrument((IMAGE_COR_ILMETHOD*)data);
+    ASSERT_EQ(2, instrument.m_instructions.size());
+
+	InstructionList instructions;
+	instructions.push_back(new Instruction(CEE_LDC_I4, 1234));
+	instructions.push_back(new Instruction(CEE_CALL, 1234));
+
+	ASSERT_FALSE(instrument.IsInstrumented(0, instructions));
+	instrument.InsertInstructionsAtOffset(0, instructions);
+
+	// now we need to pretend we are rejitting 
+    int size = instrument.GetMethodSize();
+    BYTE* pBuffer = new BYTE[size];
+    COR_ILMETHOD_FAT *newMethod = (COR_ILMETHOD_FAT*)pBuffer;
+    instrument.WriteMethod((IMAGE_COR_ILMETHOD*)newMethod);
+
+    Method newInstrument((IMAGE_COR_ILMETHOD*)newMethod);
+    delete []newMethod;
+
+	ASSERT_TRUE(newInstrument.IsInstrumented(0, instructions));
+	ASSERT_FALSE(newInstrument.IsInstrumented(5, instructions));
+	ASSERT_FALSE(newInstrument.IsInstrumented(1, instructions)); // no instruction at offset 0
+
+}

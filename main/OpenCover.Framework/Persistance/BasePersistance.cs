@@ -15,14 +15,14 @@ namespace OpenCover.Framework.Persistance
     /// </summary>
     public abstract class BasePersistance : IPersistance
     {
-        protected readonly ICommandLine _commandLine;
+        protected readonly ICommandLine CommandLine;
         private readonly ILog _logger;
         private uint _trackedMethodId;
-        private Dictionary<Module, Dictionary<int, KeyValuePair<Class, Method>>> _moduleMethodMap = new Dictionary<Module, Dictionary<int, KeyValuePair<Class, Method>>>(); 
+        private readonly Dictionary<Module, Dictionary<int, KeyValuePair<Class, Method>>> _moduleMethodMap = new Dictionary<Module, Dictionary<int, KeyValuePair<Class, Method>>>(); 
 
         protected BasePersistance(ICommandLine commandLine, ILog logger)
         {
-            _commandLine = commandLine;
+            CommandLine = commandLine;
             _logger = logger;
             CoverageSession = new CoverageSession();
             _trackedMethodId = 0;
@@ -34,7 +34,7 @@ namespace OpenCover.Framework.Persistance
         {
             if (module == null) return;
             module.Classes = module.Classes ?? new Class[0];
-            if (_commandLine.MergeByHash)
+            if (CommandLine.MergeByHash)
             {
                 var modules = CoverageSession.Modules ?? new Module[0];
                 var existingModule = modules.FirstOrDefault(x => x.ModuleHash == module.ModuleHash);
@@ -68,40 +68,187 @@ namespace OpenCover.Framework.Persistance
         public virtual void Commit()
         {
             PopulateInstrumentedPoints();
+
+            if (CommandLine.HideSkipped == null) return;
+            
+            if (!CommandLine.HideSkipped.Any()) return;
+            
+            foreach (var skippedMethod in CommandLine.HideSkipped.OrderBy(x => x))
+            {
+                switch (skippedMethod)
+                {
+                    case SkippedMethod.File:
+                        RemoveSkippedMethods(SkippedMethod.File);
+                        RemoveEmptyClasses();
+                        RemoveUnreferencedFiles();
+                        break;
+                    case SkippedMethod.Filter:
+                        RemoveSkippedModules(SkippedMethod.Filter);
+                        RemoveSkippedClasses(SkippedMethod.Filter);
+                        break;
+                    case SkippedMethod.MissingPdb:
+                        RemoveSkippedModules(SkippedMethod.MissingPdb);
+                        break;
+                    case SkippedMethod.Attribute:
+                        RemoveSkippedClasses(SkippedMethod.Attribute);
+                        RemoveSkippedMethods(SkippedMethod.Attribute);
+                        RemoveEmptyClasses();
+                        break;
+                }
+            }
+        }
+
+        private void RemoveSkippedModules(SkippedMethod skipped)
+        {
+            if (CoverageSession.Modules == null) return;
+            var modules = CoverageSession.Modules;
+            modules = modules.Where(x => x.SkippedDueTo != skipped).ToArray();
+            CoverageSession.Modules = modules;
+        }
+
+        private void RemoveSkippedClasses(SkippedMethod skipped)
+        {
+            if (CoverageSession.Modules == null) return;
+            foreach (var module in CoverageSession.Modules)
+            {
+                if (module.Classes == null) continue;
+                var classes = module.Classes.Where(x => x.SkippedDueTo != skipped).ToArray();
+                module.Classes = classes;
+            }
+        }
+
+        private void RemoveSkippedMethods(SkippedMethod skipped)
+        {
+            if (CoverageSession.Modules == null) return;
+            foreach (var module in CoverageSession.Modules)
+            {
+                if (module.Classes == null) continue;
+                foreach (var @class in module.Classes)
+                {
+                    if (@class.Methods == null) continue;
+                    var methods = @class.Methods.Where(x => x.SkippedDueTo != skipped).ToArray();
+                    @class.Methods = methods;
+                }
+            }
+        }
+
+        private void RemoveEmptyClasses()
+        {
+            if (CoverageSession.Modules == null) return;
+            foreach (var module in CoverageSession.Modules)
+            {
+                if (module.Classes == null) continue;
+                module.Classes = module.Classes.Where(@class => @class.Methods != null && @class.Methods.Any()).ToArray();
+            }
+        }
+
+        private void RemoveUnreferencedFiles()
+        {
+            if (CoverageSession.Modules == null) return;
+            foreach (var module in CoverageSession.Modules)
+            {
+                module.Files = (from file in module.Files ?? new File[0] 
+                                from @class in module.Classes ?? new Class[0]
+                                where (@class.Methods ?? new Method[0]).Where(x=>x.FileRef != null).Any(x => x.FileRef.UniqueId == file.UniqueId)
+                                select file).Distinct().ToArray();
+            }
         }
 
         protected void PopulateInstrumentedPoints()
         {
             if (CoverageSession.Modules == null) return;
-           
-            foreach (var method in from module in CoverageSession.Modules
-                                   from @class in module.Classes ?? new Class[0]
-                                   from method in @class.Methods ?? new Method[0]
+
+            foreach (var method in from @class in
+                                       (from module in CoverageSession.Modules
+                                        from @class in module.Classes ?? new Class[0]
+                                        select @class)
+                                   where @class.Methods.Any(m => m.ShouldSerializeSkippedDueTo())
+                                   where @class.Methods.All(m => m.FileRef == null)
+                                   from method in @class.Methods.Where(x => !x.ShouldSerializeSkippedDueTo())
                                    select method)
             {
-                var sequencePoints = method.SequencePoints ?? new SequencePoint[0];
-                var branchPoints = method.BranchPoints ?? new BranchPoint[0];
-
-                if (method.MethodPoint != null)
-                {
-                    method.Visited = (method.MethodPoint.VisitCount > 0);
-                }
-
-                var numTotBrPoint = branchPoints.Count();
-                var numVisBrPoint = branchPoints.Count(pt => pt.VisitCount != 0);
-                var numTotSeqPoint = sequencePoints.Count();
-                var numVisSeqPoint = sequencePoints.Count(pt => pt.VisitCount != 0);
-
-                if (numTotSeqPoint > 0)
-                    method.SequenceCoverage = (numVisSeqPoint * 100) / numTotSeqPoint;
-
-                if (numTotBrPoint == 0)
-                {
-                    if (numVisSeqPoint > 0) method.BranchCoverage = 100;
-                }
-                else
-                    method.BranchCoverage = (numVisBrPoint * 100) / numTotBrPoint;
+                method.MarkAsSkipped(SkippedMethod.Inferred);
             }
+
+            foreach (var module in CoverageSession.Modules.Where(x => !x.ShouldSerializeSkippedDueTo()))
+            {
+                foreach (var @class in (module.Classes ?? new Class[0]).Where(x => !x.ShouldSerializeSkippedDueTo()))
+                {
+
+                    foreach (var method in (@class.Methods ?? new Method[0]).Where(x => !x.ShouldSerializeSkippedDueTo()))
+                    {
+                        var sequencePoints = method.SequencePoints ?? new SequencePoint[0];
+                        var branchPoints = method.BranchPoints ?? new BranchPoint[0];
+
+                        if (method.MethodPoint != null)
+                        {
+                            method.Visited = (method.MethodPoint.VisitCount > 0);
+                        }
+
+                        method.Summary.NumBranchPoints = branchPoints.Count();
+                        method.Summary.VisitedBranchPoints = branchPoints.Count(pt => pt.VisitCount != 0);
+                        method.Summary.NumSequencePoints = sequencePoints.Count();
+                        method.Summary.VisitedSequencePoints = sequencePoints.Count(pt => pt.VisitCount != 0);
+
+                        if (method.Summary.NumSequencePoints > 0)
+                            method.Summary.NumBranchPoints += 1;
+
+                        if (method.Summary.VisitedSequencePoints > 0)
+                            method.Summary.VisitedBranchPoints += 1;
+
+                        AddPoints(@class.Summary, method.Summary);
+                        CalculateCoverage(method.Summary);
+
+                        method.SequenceCoverage = method.Summary.SequenceCoverage;
+                        method.BranchCoverage = method.Summary.BranchCoverage;
+
+                        method.Summary.MinCyclomaticComplexity = method.Summary.MaxCyclomaticComplexity = Math.Max(1, method.CyclomaticComplexity);
+
+                        if (@class.Summary.MinCyclomaticComplexity == 0)
+                            @class.Summary.MinCyclomaticComplexity = method.Summary.MinCyclomaticComplexity;
+                        
+                        @class.Summary.MinCyclomaticComplexity = Math.Min(@class.Summary.MinCyclomaticComplexity, method.CyclomaticComplexity);
+                        @class.Summary.MaxCyclomaticComplexity = Math.Max(@class.Summary.MaxCyclomaticComplexity, method.CyclomaticComplexity);
+                    }
+
+                    AddPoints(module.Summary, @class.Summary);
+                    CalculateCoverage(@class.Summary);
+
+                    if (module.Summary.MinCyclomaticComplexity == 0)
+                        module.Summary.MinCyclomaticComplexity = @class.Summary.MinCyclomaticComplexity;
+
+                    module.Summary.MinCyclomaticComplexity = Math.Min(module.Summary.MinCyclomaticComplexity, @class.Summary.MinCyclomaticComplexity);
+                    module.Summary.MaxCyclomaticComplexity = Math.Max(module.Summary.MaxCyclomaticComplexity, @class.Summary.MaxCyclomaticComplexity);
+                }
+
+                AddPoints(CoverageSession.Summary, module.Summary);
+                CalculateCoverage(module.Summary);
+
+                if (CoverageSession.Summary.MinCyclomaticComplexity == 0)
+                    CoverageSession.Summary.MinCyclomaticComplexity = module.Summary.MinCyclomaticComplexity;
+
+                CoverageSession.Summary.MinCyclomaticComplexity = Math.Min(CoverageSession.Summary.MinCyclomaticComplexity, module.Summary.MinCyclomaticComplexity);
+                CoverageSession.Summary.MaxCyclomaticComplexity = Math.Max(CoverageSession.Summary.MaxCyclomaticComplexity, module.Summary.MaxCyclomaticComplexity);
+            }
+
+            CalculateCoverage(CoverageSession.Summary);
+        }
+
+        private static void CalculateCoverage(Summary summary)
+        {
+            if (summary.NumSequencePoints > 0)
+                summary.SequenceCoverage = Math.Round((summary.VisitedSequencePoints*100m)/summary.NumSequencePoints, 2);
+
+            if (summary.NumBranchPoints > 0)
+                summary.BranchCoverage = Math.Round((summary.VisitedBranchPoints*100m)/summary.NumBranchPoints, 2);
+        }
+
+        private static void AddPoints(Summary parent, Summary child)
+        {
+            parent.NumBranchPoints += child.NumBranchPoints;
+            parent.VisitedBranchPoints += child.VisitedBranchPoints;
+            parent.NumSequencePoints += child.NumSequencePoints;
+            parent.VisitedSequencePoints += child.VisitedSequencePoints;
         }
 
         public bool GetSequencePointsForFunction(string modulePath, int functionToken, out InstrumentationPoint[] sequencePoints)

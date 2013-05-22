@@ -9,10 +9,11 @@ using System.Xml.Serialization;
 namespace OpenCover.Framework.Model
 {
     /// <summary>
-    /// An entity that can be instrumented
+    /// An method entity that can be instrumented
     /// </summary>
-    public class Method : SkippedEntity
+    public class Method : SummarySkippedEntity
     {
+
         /// <summary>
         /// The MetadataToken used to identify this entity within the assembly
         /// </summary>
@@ -61,14 +62,14 @@ namespace OpenCover.Framework.Model
         /// </summary>
         /// <remarks>Rounded for ease</remarks>
         [XmlAttribute("sequenceCoverage")]
-        public int SequenceCoverage { get; set; }
+        public decimal SequenceCoverage { get; set; }
 
         /// <summary>
         /// What is the branch coverage of this method
         /// </summary>
         /// <remarks>Rounded for ease</remarks>
         [XmlAttribute("branchCoverage")]
-        public int BranchCoverage { get; set; }
+        public decimal BranchCoverage { get; set; }
 
         /// <summary>
         /// Is this method a constructor
@@ -94,5 +95,13 @@ namespace OpenCover.Framework.Model
         [XmlAttribute("isSetter")]
         public bool IsSetter { get; set; }
 
+        public override void MarkAsSkipped(SkippedMethod reason)
+        {
+            SkippedDueTo = reason;
+            if (MethodPoint != null) MethodPoint.IsSkipped = true;
+            MethodPoint = null;
+            SequencePoints = null;
+            BranchPoints = null;
+        }
     }
 }
